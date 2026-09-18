@@ -1,0 +1,780 @@
+/* ============================================================
+   AI Input Writer — 面板样式  v0.3.0
+
+   设计路线：Minimalism（极简主义）
+     · 大量留白 —— 卡片内边距 18px、卡片间距 14px、面板左右各 24px
+     · 无装饰排版 —— 没有边框线、没有虚线、没有分割条；
+       分组全靠留白 + 极淡的卡片底色，标题靠"小字号 + 字距"
+     · 有限配色 —— 全局只有 6 个色值：
+         面板底 / 卡片底 / 输入底（同色系三档）
+         文字（靠 opacity 分主次，不再引入新色）
+         一个强调色 / 一个危险色
+     · 主次分明 —— 一套按钮里只有一个是实心，其余描边或纯文字
+
+   改细节：动下面 #aiiw-panel 里的变量即可，全文件都引用它们。
+   移动端：≤768px 宽 或 ≤520px 高（手机 / 横屏）自动切全屏触控布局。
+   ============================================================ */
+
+/* ---------- 设计变量（面板与最小化胶囊共用） ---------- */
+#aiiw-panel,
+#aiiw-minibar {
+    --aiiw-bg: var(--SmartThemeBlurTintColor, #17181b);
+    --aiiw-card: rgba(128, 128, 128, 0.075);
+    --aiiw-mist: rgba(128, 128, 128, 0.05);
+    --aiiw-field: rgba(128, 128, 128, 0.11);
+    --aiiw-field-focus: rgba(128, 128, 128, 0.17);
+    --aiiw-fg: var(--SmartThemeBodyColor, #e9e9ea);
+    --aiiw-accent: var(--SmartThemeQuoteColor, #7aa2ff);
+    --aiiw-danger: #e07070;
+
+    --aiiw-radius: 14px;
+    --aiiw-radius-sm: 9px;
+    --aiiw-pad: 18px;
+    --aiiw-gap: 14px;
+}
+
+/* ---------- 主面板：居中浮层 ---------- */
+#aiiw-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 30000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#aiiw-panel.aiiw-hidden {
+    display: none;
+}
+
+#aiiw-panel .aiiw-mask {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.64);
+}
+
+#aiiw-panel .aiiw-box {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(700px, 92vw);
+    max-height: 88vh;
+    background: var(--aiiw-bg);
+    color: var(--aiiw-fg);
+    border-radius: var(--aiiw-radius);
+    overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- 顶栏 ---------- */
+#aiiw-panel .aiiw-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 22px 24px 6px;
+    flex-shrink: 0;
+}
+
+#aiiw-panel .aiiw-title {
+    font-size: 0.76em;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    opacity: 0.42;
+}
+
+#aiiw-panel .aiiw-hbtns {
+    display: flex;
+    gap: 4px;
+}
+
+/* 顶栏图标按钮（纯文字符号，不用图标字体） */
+#aiiw-panel .aiiw-icon-btn {
+    cursor: pointer;
+    opacity: 0.4;
+    font-size: 0.95em;
+    line-height: 1;
+    padding: 6px 8px;
+    border-radius: 6px;
+    user-select: none;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+#aiiw-panel .aiiw-icon-btn:hover {
+    opacity: 1;
+    background: var(--aiiw-card);
+}
+
+/* ---------- 主体 ---------- */
+#aiiw-panel .aiiw-body {
+    padding: 14px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--aiiw-gap);
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+/* 滚动条也做轻，别抢注意力 */
+#aiiw-panel .aiiw-body::-webkit-scrollbar,
+#aiiw-panel .aiiw-entry-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+#aiiw-panel .aiiw-body::-webkit-scrollbar-track,
+#aiiw-panel .aiiw-entry-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#aiiw-panel .aiiw-body::-webkit-scrollbar-thumb,
+#aiiw-panel .aiiw-entry-list::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.28);
+    border-radius: 4px;
+}
+
+/* ---------- 卡片：唯一的分组手段 ---------- */
+#aiiw-panel .aiiw-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: var(--aiiw-pad);
+    background: var(--aiiw-card);
+    border-radius: var(--aiiw-radius);
+}
+
+#aiiw-panel .aiiw-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+#aiiw-panel .aiiw-card-title {
+    margin: 0;
+    font-size: 0.76em;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    opacity: 0.42;
+    flex-shrink: 0;
+}
+
+/* ---------- 输入控件：无边框，靠底色区分 ---------- */
+#aiiw-panel .aiiw-input {
+    box-sizing: border-box;
+    width: 100%;
+    font-family: inherit;
+    font-size: 0.92em;
+    line-height: 1.55;
+    color: inherit;
+    background: var(--aiiw-field);
+    border: none;
+    border-radius: var(--aiiw-radius-sm);
+    padding: 10px 12px;
+    outline: none;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+#aiiw-panel .aiiw-input:focus {
+    background: var(--aiiw-field-focus);
+    box-shadow: inset 0 -1.5px 0 0 var(--aiiw-accent);
+}
+
+#aiiw-panel textarea.aiiw-input {
+    resize: vertical;
+    min-height: 68px;
+}
+
+#aiiw-intent {
+    min-height: 76px;
+}
+
+#aiiw-result {
+    min-height: 170px;
+}
+
+#aiiw-set-sysprompt {
+    min-height: 170px;
+    font-size: 0.86em;
+}
+
+/* 数字输入窄一点 */
+#aiiw-panel .aiiw-num {
+    width: 72px;
+    flex: 0 0 auto;
+}
+
+/* 下拉框不要占满整行 */
+#aiiw-panel select.aiiw-input {
+    width: auto;
+    max-width: 100%;
+    cursor: pointer;
+}
+
+/* 占满剩余宽度 */
+#aiiw-panel .aiiw-grow {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
+
+#aiiw-panel .aiiw-nowrap {
+    white-space: nowrap;
+}
+
+/* ---------- 一行 / 一行两端对齐 ---------- */
+#aiiw-panel .aiiw-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.88em;
+}
+
+#aiiw-panel .aiiw-line-label {
+    opacity: 0.45;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+#aiiw-panel .aiiw-between {
+    justify-content: space-between;
+}
+
+/* ---------- 复选框 ---------- */
+#aiiw-panel input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--aiiw-accent);
+    cursor: pointer;
+}
+
+#aiiw-panel .aiiw-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 0.86em;
+    opacity: 0.82;
+    cursor: pointer;
+}
+
+/* ---------- 标签页：只有选中项有下划线 ---------- */
+#aiiw-panel .aiiw-tabs {
+    display: flex;
+    gap: 20px;
+}
+
+#aiiw-panel .aiiw-tab {
+    font-size: 0.88em;
+    opacity: 0.4;
+    cursor: pointer;
+    padding: 2px 0 6px;
+    border-bottom: 1.5px solid transparent;
+    white-space: nowrap;
+    user-select: none;
+    transition: opacity 0.15s, border-color 0.15s;
+}
+
+#aiiw-panel .aiiw-tab:hover {
+    opacity: 0.72;
+}
+
+#aiiw-panel .aiiw-tab.aiiw-active {
+    opacity: 1;
+    border-bottom-color: var(--aiiw-accent);
+}
+
+#aiiw-panel .aiiw-tabpane {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 6px;
+}
+
+#aiiw-panel .aiiw-tabpane.aiiw-hidden {
+    display: none;
+}
+
+#aiiw-panel .aiiw-pane-tools {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* ---------- 内置风格列表 ---------- */
+#aiiw-style-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+}
+
+#aiiw-panel .aiiw-style-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88em;
+    cursor: pointer;
+}
+
+#aiiw-panel .aiiw-style-item .aiiw-del {
+    font-size: 0.8em;
+    opacity: 0.22;
+    cursor: pointer;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+#aiiw-panel .aiiw-style-item .aiiw-del:hover {
+    opacity: 1;
+    color: var(--aiiw-danger);
+}
+
+/* ---------- 条目列表（预设 / 世界书共用） ---------- */
+#aiiw-panel .aiiw-entry-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 268px;
+    padding: 5px;
+    background: var(--aiiw-mist);
+    border-radius: var(--aiiw-radius-sm);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+#aiiw-panel .aiiw-entry {
+    padding: 7px 9px;
+    border-radius: 7px;
+    transition: background 0.12s;
+}
+
+#aiiw-panel .aiiw-entry:hover {
+    background: var(--aiiw-card);
+}
+
+#aiiw-panel .aiiw-entry.aiiw-dim {
+    opacity: 0.42;
+}
+
+#aiiw-panel .aiiw-entry-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+    cursor: pointer;
+}
+
+#aiiw-panel .aiiw-entry-name {
+    font-size: 0.88em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#aiiw-panel .aiiw-entry-meta {
+    margin-left: auto;
+    font-size: 0.72em;
+    opacity: 0.38;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* 「文风」标记：不再用胶囊边框，只降对比度 */
+#aiiw-panel .aiiw-badge {
+    font-size: 0.68em;
+    letter-spacing: 0.08em;
+    opacity: 0.45;
+    flex-shrink: 0;
+}
+
+#aiiw-panel .aiiw-entry-preview {
+    margin: 3px 0 0 24px;
+    font-size: 0.76em;
+    line-height: 1.55;
+    opacity: 0.4;
+    cursor: pointer;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* 点开的条目：展开全文（限高内滚） */
+#aiiw-panel .aiiw-entry.aiiw-open .aiiw-entry-preview {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-height: 240px;
+    overflow-y: auto;
+    opacity: 0.62;
+}
+
+/* ---------- 字数状态 ---------- */
+#aiiw-count {
+    font-size: 0.82em;
+    opacity: 0.45;
+}
+
+#aiiw-count.aiiw-ok {
+    color: var(--aiiw-accent);
+    opacity: 1;
+}
+
+#aiiw-count.aiiw-low,
+#aiiw-count.aiiw-high {
+    color: #d8a860;
+    opacity: 1;
+}
+
+/* ---------- 生成中提示 ---------- */
+#aiiw-generating {
+    font-size: 0.82em;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+#aiiw-generating.aiiw-visible {
+    opacity: 0.6;
+}
+
+/* ---------- 错误条 ---------- */
+#aiiw-error {
+    padding: 11px 13px;
+    background: rgba(224, 112, 112, 0.13);
+    color: var(--aiiw-danger);
+    border-radius: var(--aiiw-radius-sm);
+    font-size: 0.84em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+#aiiw-error.aiiw-hidden {
+    display: none;
+}
+
+/* ---------- 按钮：一个实心 + 一个描边，没有第三种 ---------- */
+#aiiw-panel .aiiw-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+#aiiw-panel .aiiw-btn {
+    font-family: inherit;
+    font-size: 0.88em;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--aiiw-radius-sm);
+    background: var(--aiiw-accent);
+    color: #fff;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+#aiiw-panel .aiiw-btn:hover {
+    opacity: 0.86;
+}
+
+#aiiw-panel .aiiw-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+#aiiw-panel .aiiw-btn-ghost {
+    background: transparent;
+    color: inherit;
+    opacity: 0.62;
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.28);
+}
+
+#aiiw-panel .aiiw-btn-ghost:hover {
+    opacity: 1;
+}
+
+/* ---------- 小号文字操作 ---------- */
+#aiiw-panel .aiiw-mini {
+    font-size: 0.82em;
+    opacity: 0.45;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+
+#aiiw-panel .aiiw-mini:hover {
+    opacity: 1;
+}
+
+/* ---------- 折叠的设置区 ---------- */
+#aiiw-settings-toggle {
+    align-self: flex-start;
+}
+
+#aiiw-settings {
+    display: none;
+    flex-direction: column;
+    gap: var(--aiiw-gap);
+}
+
+#aiiw-settings.aiiw-open {
+    display: flex;
+}
+
+#aiiw-custom-block {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ---------- 提示文字 ---------- */
+#aiiw-panel .aiiw-hint,
+#aiiw-panel .aiiw-note {
+    margin: 0;
+    font-size: 0.78em;
+    line-height: 1.6;
+    opacity: 0.4;
+    word-break: break-word;
+}
+
+#aiiw-panel code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.94em;
+    padding: 1px 5px;
+    background: rgba(128, 128, 128, 0.15);
+    border-radius: 4px;
+}
+
+/* ---------- 最小化胶囊 ---------- */
+#aiiw-minibar {
+    position: fixed;
+    right: 24px;
+    bottom: 112px;
+    z-index: 29999;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    background: var(--aiiw-bg);
+    color: var(--aiiw-fg);
+    font-size: 1em;
+    opacity: 0.68;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    transition: opacity 0.15s, transform 0.15s;
+}
+
+#aiiw-minibar.aiiw-visible {
+    display: flex;
+}
+
+#aiiw-minibar:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+/* ============================================================
+   移动端 / 窄屏适配
+   触发：宽度 ≤768px，或高度 ≤520px（横屏手机、小窗口）
+   策略：面板全屏化、控件纵向排布、触控目标放大、
+        输入字号锁 16px（防 iOS 聚焦时页面被放大）
+   ============================================================ */
+@media (max-width: 768px), (max-height: 520px) {
+
+    #aiiw-panel {
+        align-items: stretch;
+        justify-content: stretch;
+    }
+
+    #aiiw-panel .aiiw-mask {
+        display: none;
+    }
+
+    #aiiw-panel .aiiw-box {
+        width: 100%;
+        height: 100%;
+        max-height: none;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    #aiiw-panel .aiiw-header {
+        padding: 14px 18px 4px;
+        padding-top: max(14px, env(safe-area-inset-top));
+    }
+
+    #aiiw-panel .aiiw-icon-btn {
+        font-size: 1.1em;
+        padding: 8px 10px;
+    }
+
+    #aiiw-panel .aiiw-body {
+        padding: 12px 16px 20px;
+        padding-bottom: max(20px, env(safe-area-inset-bottom));
+        gap: 12px;
+    }
+
+    #aiiw-panel .aiiw-card {
+        padding: 15px;
+        gap: 11px;
+        border-radius: 12px;
+    }
+
+    /* 控件加高、字号锁 16px */
+    #aiiw-panel textarea.aiiw-input,
+    #aiiw-panel input.aiiw-input,
+    #aiiw-panel select.aiiw-input {
+        font-size: 16px;
+        min-height: 42px;
+    }
+
+    #aiiw-panel textarea.aiiw-input {
+        resize: none;
+    }
+
+    #aiiw-intent {
+        min-height: 88px;
+    }
+
+    #aiiw-result {
+        min-height: 190px;
+    }
+
+    #aiiw-panel .aiiw-line {
+        gap: 8px;
+        font-size: 0.95em;
+    }
+
+    #aiiw-panel .aiiw-num {
+        width: 84px;
+    }
+
+    /* 三个标签页等分，手指友好 */
+    #aiiw-panel .aiiw-tabs {
+        gap: 0;
+    }
+
+    #aiiw-panel .aiiw-tab {
+        flex: 1;
+        text-align: center;
+        padding: 11px 4px;
+        font-size: 0.9em;
+    }
+
+    /* 列表给足高度，方便滑动 */
+    #aiiw-panel .aiiw-entry-list {
+        max-height: 40vh;
+        max-height: 40dvh;
+        padding: 7px;
+    }
+
+    #aiiw-panel .aiiw-entry {
+        padding: 9px 10px;
+    }
+
+    #aiiw-panel .aiiw-entry-preview {
+        -webkit-line-clamp: 3;
+        margin-left: 28px;
+    }
+
+    /* 复选框放大到能点 */
+    #aiiw-panel input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+    }
+
+    #aiiw-panel .aiiw-check {
+        gap: 10px;
+        font-size: 0.95em;
+    }
+
+    /* 内置风格整行排布 */
+    #aiiw-style-list {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    #aiiw-panel .aiiw-style-item {
+        font-size: 1em;
+    }
+
+    /* 按钮撑满、够高 */
+    #aiiw-panel .aiiw-actions {
+        gap: 9px;
+    }
+
+    #aiiw-panel .aiiw-btn {
+        flex: 1;
+        min-height: 46px;
+        font-size: 0.95em;
+    }
+
+    #aiiw-panel .aiiw-mini {
+        font-size: 0.9em;
+        padding: 4px 0;
+    }
+
+    #aiiw-panel .aiiw-icon-btn {
+        padding: 8px;
+    }
+
+    /* 最小化胶囊：避开底部发送栏 + 安全区 */
+    #aiiw-minibar {
+        right: 14px;
+        bottom: calc(150px + env(safe-area-inset-bottom));
+        width: 52px;
+        height: 52px;
+    }
+}
+
+/* 超窄屏（小屏手机竖屏） */
+@media (max-width: 420px) {
+    #aiiw-panel .aiiw-body {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    #aiiw-panel .aiiw-card {
+        padding: 13px;
+    }
+
+    #aiiw-panel .aiiw-num {
+        width: 74px;
+    }
+
+    #aiiw-panel .aiiw-tab {
+        font-size: 0.84em;
+        padding: 11px 2px;
+    }
+}
+
+/* 横屏矮屏：压缩纵向留白，保证结果区可见 */
+@media (max-height: 520px) and (orientation: landscape) {
+    #aiiw-intent {
+        min-height: 56px;
+    }
+
+    #aiiw-result {
+        min-height: 110px;
+    }
+
+    #aiiw-panel .aiiw-entry-list {
+        max-height: 34vh;
+        max-height: 34dvh;
+    }
+
+    #aiiw-minibar {
+        bottom: 92px;
+    }
+}
