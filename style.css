@@ -1,5 +1,5 @@
 /* ============================================================
-   AI Input Writer — 面板样式  v0.3.0
+   AI Input Writer — 面板样式  v0.4.0
 
    设计路线：Minimalism（极简主义）
      · 大量留白 —— 卡片内边距 18px、卡片间距 14px、面板左右各 24px
@@ -301,6 +301,11 @@
     display: none;
 }
 
+/* 手填框与模型下拉互斥 */
+#aiiw-panel .aiiw-input.aiiw-hidden {
+    display: none;
+}
+
 #aiiw-panel .aiiw-pane-tools {
     display: flex;
     align-items: center;
@@ -429,6 +434,25 @@
 #aiiw-count.aiiw-low,
 #aiiw-count.aiiw-high {
     color: #d8a860;
+    opacity: 1;
+}
+
+/* ---------- 测试连接结果 ---------- */
+#aiiw-panel .aiiw-test {
+    font-size: 0.82em;
+    line-height: 1.5;
+    opacity: 0.5;
+    min-width: 0;
+    flex: 1;
+}
+
+#aiiw-panel .aiiw-test.aiiw-ok {
+    color: var(--aiiw-accent);
+    opacity: 1;
+}
+
+#aiiw-panel .aiiw-test.aiiw-err {
+    color: var(--aiiw-danger);
     opacity: 1;
 }
 
@@ -654,6 +678,14 @@
     #aiiw-panel .aiiw-line {
         gap: 8px;
         font-size: 0.95em;
+    }
+
+    /* 纯文字操作在触屏上点击区域太小，撑开一点 */
+    #aiiw-panel .aiiw-mini {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 0 4px;
     }
 
     #aiiw-panel .aiiw-num {

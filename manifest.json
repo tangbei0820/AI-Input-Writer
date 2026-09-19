@@ -6,8 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "北北",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "homePage": "https://github.com/tangbei0820/AI-Input-Writer",
   "auto_update": true,
-  "description": "输入一句剧情梗概，结合当前聊天上下文与选定文风，扩写成一段可直接发送的 Input。支持内联抓取预设条目与世界书条目、指定楼层作仿写样本、思维链标签清洗、字数控制，绝不自动发送。"
+  "description": "输入一句剧情梗概，结合当前聊天上下文与选定文风，扩写成一段可直接发送的 Input。支持内联抓取预设条目与世界书条目、指定楼层作仿写样本、思维链标签清洗、字数控制；自带取模型列表、连通性检测与多套 API 方案管理。绝不自动发送。"
 }

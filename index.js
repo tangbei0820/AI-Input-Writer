@@ -15,7 +15,7 @@
  *
  * 技术：原生 JS + jQuery（酒馆自带），无构建步骤。
  * 作者：北北（与咕咕协作）
- * 版本：0.3.0
+ * 版本：0.4.0
  * ========================================================================== */
 
 (function () {
@@ -80,6 +80,12 @@
         temperature: 0.8,
         maxTokens: 2000,
         useProxy: false,        // 自填模式是否走酒馆 /proxy 绕开 CORS
+
+        /* --- v0.4 新增：API 方案 ---
+           把一套 endpoint/key/model/参数 存成命名方案，随时切换。
+           表单改动会自动写回当前选中的方案（方案是"活"的）。 */
+        apiProfiles: [],        // [{ id, name, endpoint, apiKey, model, temperature, maxTokens, useProxy }]
+        activeProfile: '',      // 当前方案 id；'' = 未关联方案（表单即当前配置）
         minWords: 300,
         maxWords: 600,
         ctxMode: 'recent',      // 'none' | 'recent' | 'all'
@@ -328,6 +334,15 @@
         // map 字段兜底
         if (!cfg.presetPickedMap || typeof cfg.presetPickedMap !== 'object') cfg.presetPickedMap = {};
         if (!cfg.worldPickedMap || typeof cfg.worldPickedMap !== 'object') cfg.worldPickedMap = {};
+
+        // API 方案兜底
+        if (!Array.isArray(cfg.apiProfiles)) cfg.apiProfiles = [];
+        cfg.apiProfiles = cfg.apiProfiles.filter(p => p && typeof p === 'object' && p.id);
+        if (typeof cfg.activeProfile !== 'string') cfg.activeProfile = '';
+        // 选中的方案已被删掉 → 退回"未关联"
+        if (cfg.activeProfile && !cfg.apiProfiles.some(p => p.id === cfg.activeProfile)) {
+            cfg.activeProfile = '';
+        }
 
         /* 旧默认提示词 → 新默认：只在用户没自己改过时自动升级 */
         const cur = String(cfg.systemPrompt || '').trim();
@@ -789,9 +804,16 @@
 
         <div id="aiiw-custom-block">
           <div class="aiiw-line">
+            <span class="aiiw-line-label">方案</span>
+            <select id="aiiw-profile-sel" class="aiiw-input aiiw-grow"></select>
+            <span id="aiiw-profile-save" class="aiiw-mini">存为新方案</span>
+            <span id="aiiw-profile-del" class="aiiw-mini">删除</span>
+          </div>
+
+          <div class="aiiw-line">
             <span class="aiiw-line-label">Endpoint</span>
             <input id="aiiw-set-endpoint" class="aiiw-input aiiw-grow"
-              placeholder="https://你的中转站/v1/chat/completions">
+              placeholder="例：https://api.deepseek.com/chat/completions">
           </div>
           <div class="aiiw-line">
             <span class="aiiw-line-label">API Key</span>
@@ -801,6 +823,8 @@
             <span class="aiiw-line-label">Model</span>
             <input id="aiiw-set-model" class="aiiw-input aiiw-grow"
               placeholder="例：deepseek-chat">
+            <select id="aiiw-model-sel" class="aiiw-input aiiw-grow aiiw-hidden"></select>
+            <span id="aiiw-fetch-models" class="aiiw-mini">取模型</span>
           </div>
           <div class="aiiw-line">
             <span class="aiiw-line-label">Temperature</span>
@@ -808,13 +832,20 @@
             <span class="aiiw-line-label">Max Tokens</span>
             <input id="aiiw-set-maxtokens" class="aiiw-input aiiw-num" type="number" step="100" min="100">
           </div>
+          <div class="aiiw-line">
+            <span id="aiiw-test-api" class="aiiw-mini">测试连接</span>
+            <span id="aiiw-test-result" class="aiiw-test"></span>
+          </div>
           <label class="aiiw-check">
             <input id="aiiw-set-proxy" type="checkbox">
             <span>走酒馆代理（绕开浏览器跨域限制）</span>
           </label>
           <p class="aiiw-note">
-            浏览器直连第三方 API 会被跨域策略拦截。若直连失败，可在酒馆根目录 config.yaml 里设置
-            <code>enableCorsProxy: true</code>（或用 --corsProxy 启动），然后勾选上面这项。
+            Endpoint 要填<b>完整请求地址</b>（到 <code>/chat/completions</code>），不是只填域名。
+            多数 API（含 DeepSeek 官方）允许浏览器直接访问，所以<b>先别勾上面这项，直接试</b>。
+            只有提示跨域失败时，才需要开启酒馆代理：把酒馆 config.yaml 里的
+            <code>enableCorsProxy</code> 改成 <code>true</code>（或加启动参数 <code>--corsProxy</code>），
+            重启酒馆后再勾上。
           </p>
         </div>
       </section>
@@ -1681,6 +1712,370 @@
         return out;
     }
 
+    /* ========================================================================
+     * API 方案 · 取模型 · 测试连接
+     *
+     *   取模型：  GET {endpoint 去掉 /chat/completions}/models
+     *   测试连接：先试 /models（免费、快，同时验证地址和 Key）；
+     *            接口不提供 /models 时，退回发一次最小对话请求（max_tokens 8）
+     *   方案：    endpoint / key / model / 参数 存成命名方案；
+     *            表单改动自动写回当前方案（方案是「活」的，不用再点一次保存）
+     * ====================================================================== */
+
+    /** 从 Endpoint 推导模型列表地址：把结尾的 /chat/completions 换成 /models */
+    function modelsEndpoint(ep) {
+        let e = String(ep == null ? '' : ep).trim().replace(/\/+$/, '');
+        if (!e) return '';
+        if (/\/chat\/completions$/i.test(e)) return e.replace(/\/chat\/completions$/i, '/models');
+        if (/\/completions$/i.test(e)) return e.replace(/\/completions$/i, '/models');
+        return e + '/models';
+    }
+
+    /** 按当前设置决定直连还是走酒馆代理 */
+    function apiUrl(url) {
+        return (cfg && cfg.useProxy) ? '/proxy/' + url : url;
+    }
+
+    /** 带超时的 fetch（浏览器对 CORS 失败只会给一个笼统的 TypeError，所以统一包装） */
+    async function fetchWithTimeout(url, options, timeoutMs) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(function () { ctrl.abort(); }, timeoutMs || 30000);
+        try {
+            return await fetch(url, Object.assign({}, options || {}, { signal: ctrl.signal }));
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    function describeFetchError(err) {
+        if (err && err.name === 'AbortError') return '请求超时。';
+        const raw = err && err.message ? err.message : String(err);
+        return '请求发不出去 —— 可能是地址写错、跨域被拦，或网络不通。（' + raw + '）';
+    }
+
+    /** 勾了代理却拿到 404，八成是酒馆的 enableCorsProxy 还没开 */
+    function proxyDisabledHint(status) {
+        if (cfg && cfg.useProxy && status === 404) {
+            return '　【勾了「走酒馆代理」却收到 404】通常是酒馆的 CORS 代理没开：'
+                + '把 config.yaml 里的 enableCorsProxy 改成 true 后重启酒馆。'
+                + '如果地址本身写错了也会是 404，两个都看一眼。';
+        }
+        return '';
+    }
+
+    /* ---------------- 方案管理 ---------------- */
+
+    function listProfiles() {
+        return (cfg && Array.isArray(cfg.apiProfiles)) ? cfg.apiProfiles : [];
+    }
+
+    function findProfile(id) {
+        return listProfiles().find(function (p) { return p.id === id; }) || null;
+    }
+
+    /** 从当前配置读出一套 API 参数 */
+    function readApiForm() {
+        return {
+            endpoint: String(cfg.endpoint || ''),
+            apiKey: String(cfg.apiKey || ''),
+            model: String(cfg.model || ''),
+            temperature: Number(cfg.temperature) || 0.8,
+            maxTokens: Number(cfg.maxTokens) || 2000,
+            useProxy: !!cfg.useProxy,
+        };
+    }
+
+    /** 表单改动 → 写回当前选中的方案（仅当关联了方案时） */
+    function syncActiveProfile() {
+        if (!cfg || !cfg.activeProfile) return;
+        const p = findProfile(cfg.activeProfile);
+        if (!p) return;
+        Object.assign(p, readApiForm());
+        saveConfig();
+    }
+
+    function renderProfileSelect() {
+        const sel = document.getElementById('aiiw-profile-sel');
+        if (!sel || !cfg) return;
+
+        let html = '<option value="">（当前配置 · 未关联方案）</option>';
+        listProfiles().forEach(function (p) {
+            html += '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>';
+        });
+        sel.innerHTML = html;
+        sel.value = cfg.activeProfile || '';
+        if (sel.value !== (cfg.activeProfile || '')) sel.value = '';
+
+        const del = document.getElementById('aiiw-profile-del');
+        if (del) del.style.display = cfg.activeProfile ? '' : 'none';
+    }
+
+    /** 把某个方案的内容填进表单 */
+    function applyProfile(id) {
+        if (!cfg) return;
+        const p = findProfile(id);
+        cfg.activeProfile = p ? id : '';
+
+        if (p) {
+            cfg.endpoint = p.endpoint || '';
+            cfg.apiKey = p.apiKey || '';
+            cfg.model = p.model || '';
+            cfg.temperature = (p.temperature != null) ? p.temperature : 0.8;
+            cfg.maxTokens = (p.maxTokens != null) ? p.maxTokens : 2000;
+            cfg.useProxy = !!p.useProxy;
+        }
+        saveConfig();
+
+        setValue('aiiw-set-endpoint', cfg.endpoint);
+        setValue('aiiw-set-apikey', cfg.apiKey);
+        setValue('aiiw-set-temp', cfg.temperature);
+        setValue('aiiw-set-maxtokens', cfg.maxTokens);
+        setChecked('aiiw-set-proxy', cfg.useProxy);
+        resetModelPick(cfg.model);
+        clearTestResult();
+        renderProfileSelect();
+    }
+
+    function onSaveProfile() {
+        if (!cfg) return;
+        const form = readApiForm();
+        if (!form.endpoint.trim()) {
+            setTestResult('✗ 先填 Endpoint 再存方案。', 'err');
+            return;
+        }
+        const suggested = form.model || ('方案 ' + (listProfiles().length + 1));
+        let name;
+        try {
+            name = window.prompt('给这套 API 配置起个名字：', suggested);
+        } catch (e) {
+            name = suggested;   // 极少数环境禁用了 prompt，退回建议名
+        }
+        if (name == null) return;
+        const trimmed = String(name).trim();
+        if (!trimmed) return;
+
+        const p = Object.assign({
+            id: 'p' + Date.now() + Math.random().toString(36).slice(2, 6),
+            name: trimmed,
+        }, form);
+        cfg.apiProfiles.push(p);
+        cfg.activeProfile = p.id;
+        saveConfig();
+        renderProfileSelect();
+        setTestResult('已存为「' + trimmed + '」', 'ok');
+    }
+
+    function onDeleteProfile() {
+        if (!cfg || !cfg.activeProfile) return;
+        const p = findProfile(cfg.activeProfile);
+        if (!p) return;
+        try {
+            if (!window.confirm('删除方案「' + p.name + '」？\n当前填的这套配置会保留，只是不再关联方案。')) return;
+        } catch (e) { /* 环境不支持 confirm：用户既然点了删除，就按确认处理 */ }
+        const removing = cfg.activeProfile;
+        cfg.apiProfiles = listProfiles().filter(function (x) { return x.id !== removing; });
+        cfg.activeProfile = '';
+        saveConfig();
+        renderProfileSelect();
+        clearTestResult();
+    }
+
+    /* ---------------- 取模型 ---------------- */
+
+    /** 收起模型下拉，回到手动输入 */
+    function resetModelPick(modelValue) {
+        const input = document.getElementById('aiiw-set-model');
+        const sel = document.getElementById('aiiw-model-sel');
+        const btn = document.getElementById('aiiw-fetch-models');
+        if (input) {
+            input.classList.remove('aiiw-hidden');
+            if (modelValue != null) input.value = modelValue;
+        }
+        if (sel) {
+            sel.classList.add('aiiw-hidden');
+            sel.innerHTML = '';
+        }
+        if (btn) btn.textContent = '取模型';
+    }
+
+    /** GET {base}/models */
+    async function fetchModelList() {
+        if (!cfg) throw new Error('扩展还没初始化完。');
+        const ep = String(cfg.endpoint || '').trim();
+        if (!ep) throw new Error('先填 Endpoint。');
+        if (!String(cfg.apiKey || '').trim()) throw new Error('先填 API Key。');
+
+        let res;
+        try {
+            res = await fetchWithTimeout(apiUrl(modelsEndpoint(ep)), {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + String(cfg.apiKey).trim() },
+            }, 30000);
+        } catch (err) {
+            throw new Error(describeFetchError(err));
+        }
+
+        if (res.status === 401 || res.status === 403) {
+            const e = new Error('API Key 无效或没有权限（HTTP ' + res.status + '）。');
+            e.status = res.status;
+            throw e;
+        }
+        if (!res.ok) {
+            const e = new Error('这个接口没有返回模型列表（HTTP ' + res.status + '）。'
+                + proxyDisabledHint(res.status));
+            e.status = res.status;
+            throw e;
+        }
+
+        let data;
+        try {
+            data = await res.json();
+        } catch (e) {
+            const err = new Error('模型接口返回的不是合法 JSON。');
+            err.status = 200;
+            throw err;
+        }
+
+        const raw = (data && (data.data || data.models || data.result)) || [];
+        const ids = [];
+        if (Array.isArray(raw)) {
+            raw.forEach(function (m) {
+                const id = (typeof m === 'string') ? m : (m && (m.id || m.name));
+                if (id) ids.push(String(id));
+            });
+        }
+        if (!ids.length) {
+            const e = new Error('接口连上了，但它没返回任何模型。');
+            e.status = 200;
+            throw e;
+        }
+        return ids.sort();
+    }
+
+    async function onFetchModels() {
+        const btn = document.getElementById('aiiw-fetch-models');
+        const sel = document.getElementById('aiiw-model-sel');
+        const input = document.getElementById('aiiw-set-model');
+        if (!btn || !sel || !input || !cfg) return;
+        if (btn.dataset.busy === '1') return;
+        btn.dataset.busy = '1';
+        btn.textContent = '拉取中…';
+
+        try {
+            const models = await fetchModelList();
+
+            let options = models.map(function (m) {
+                return '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>';
+            }).join('');
+            options += '<option value="">✎ 手动输入</option>';
+            sel.innerHTML = options;
+
+            // 当前 model 在列表里就沿用，否则取第一个
+            let pick = models.indexOf(String(cfg.model || '').trim());
+            if (pick === -1) pick = 0;
+            sel.value = models[pick];
+
+            cfg.model = models[pick];
+            input.value = models[pick];
+            syncActiveProfile();
+            saveConfig();
+
+            sel.classList.remove('aiiw-hidden');
+            input.classList.add('aiiw-hidden');
+            btn.textContent = models.length + ' 个模型';
+            clearTestResult();
+        } catch (err) {
+            btn.textContent = '取模型';
+            setTestResult('✗ ' + (err && err.message ? err.message : String(err)), 'err');
+        } finally {
+            btn.dataset.busy = '0';
+        }
+    }
+
+    /* ---------------- 测试连接 ---------------- */
+
+    function setTestResult(text, kind) {
+        const el = document.getElementById('aiiw-test-result');
+        if (!el) return;
+        el.textContent = text || '';
+        el.className = 'aiiw-test' + (kind ? ' aiiw-' + kind : '');
+    }
+
+    function clearTestResult() {
+        setTestResult('', '');
+    }
+
+    /** 最小对话请求：验证 endpoint + key + model 三者都对 */
+    async function testMinimalChat() {
+        const model = String(cfg.model || '').trim();
+        if (!model) throw new Error('先填 Model。');
+
+        let res;
+        try {
+            res = await fetchWithTimeout(apiUrl(String(cfg.endpoint).trim()), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + String(cfg.apiKey).trim(),
+                },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{ role: 'user', content: 'hi' }],
+                    max_tokens: 8,
+                    stream: false,
+                }),
+            }, 45000);
+        } catch (err) {
+            throw new Error(describeFetchError(err));
+        }
+
+        if (res.status === 401 || res.status === 403) {
+            throw new Error('API Key 无效或没有权限（HTTP ' + res.status + '）。');
+        }
+        if (!res.ok) {
+            let extra = '';
+            try {
+                const j = await res.json();
+                if (j && j.error && j.error.message) extra = '：' + j.error.message;
+            } catch (e) { /* 响应体不是 JSON，忽略 */ }
+            throw new Error('对话接口返回 HTTP ' + res.status + extra + proxyDisabledHint(res.status));
+        }
+        return true;
+    }
+
+    async function testConnection() {
+        if (!cfg) throw new Error('扩展还没初始化完。');
+        if (!String(cfg.endpoint || '').trim()) throw new Error('先填 Endpoint。');
+        if (!String(cfg.apiKey || '').trim()) throw new Error('先填 API Key。');
+
+        try {
+            const models = await fetchModelList();
+            return '✓ 连接正常，这个接口有 ' + models.length + ' 个模型可用。';
+        } catch (err) {
+            const st = err && err.status;
+            if (st === 401 || st === 403) throw err;        // Key 的问题，重试也没用
+            if (st && st >= 400 && st < 500) {              // 接口不提供 /models → 退回真实对话
+                await testMinimalChat();
+                return '✓ 连接正常（该接口不提供模型列表）。';
+            }
+            throw err;
+        }
+    }
+
+    async function onTestApi() {
+        const btn = document.getElementById('aiiw-test-api');
+        if (!btn || btn.dataset.busy === '1') return;
+        btn.dataset.busy = '1';
+        setTestResult('测试中…', '');
+        try {
+            setTestResult(await testConnection(), 'ok');
+        } catch (err) {
+            setTestResult('✗ ' + (err && err.message ? err.message : String(err)), 'err');
+        } finally {
+            btn.dataset.busy = '0';
+        }
+    }
+
     /** 模式 B：自填 OpenAI 兼容 API。可走酒馆 /proxy 绕开 CORS。 */
     async function genViaCustom(sys, usr) {
         if (!cfg.endpoint || !cfg.endpoint.trim()) throw new Error('请先在「设置」里填写 API Endpoint。');
@@ -1717,11 +2112,14 @@
             if (err && err.name === 'AbortError') {
                 throw new Error('请求超时（超过 120 秒）。');
             }
+            const raw = err && err.message ? err.message : String(err);
             throw new Error(
-                '请求失败：可能是浏览器跨域策略拦截，或网络不可达。\n'
-                + '· 确认该 API 允许来自酒馆的跨域请求；或\n'
-                + '· 在酒馆 config.yaml 里设置 enableCorsProxy: true，然后勾选「走酒馆代理」。\n'
-                + '原始错误：' + (err && err.message ? err.message : String(err))
+                '请求在浏览器这一层就没发出去。常见三种原因，按顺序排查：\n'
+                + '1) Endpoint 写错或写不全 —— 必须是完整地址，到 /chat/completions 结尾；\n'
+                + '2) 该 API 不允许浏览器直连（跨域）—— 把酒馆 config.yaml 的 enableCorsProxy 改成 true，'
+                + '重启酒馆后再勾选「走酒馆代理」；\n'
+                + '3) 网络不通 —— 手机所在网络访问不到这个地址。\n'
+                + '原始错误：' + raw
             );
         } finally {
             clearTimeout(timer);
@@ -1914,6 +2312,8 @@
         setValue('aiiw-set-temp', cfg.temperature);
         setValue('aiiw-set-maxtokens', cfg.maxTokens);
         setChecked('aiiw-set-proxy', cfg.useProxy);
+        resetModelPick(cfg.model);
+        renderProfileSelect();
         setValue('aiiw-set-sysprompt', cfg.systemPrompt);
 
         setChecked('aiiw-preset-onlystyle', cfg.presetOnlyStyle);
@@ -2170,21 +2570,50 @@
         });
 
         /* --- 设置字段 --- */
-        function bindText(id, key, isNum) {
+        function bindText(id, key, isNum, touchApi) {
             const el = q(id);
             if (!el) return;
             el.addEventListener('change', function () {
                 if (!cfg) return;
                 cfg[key] = isNum ? Number(this.value) : this.value;
+                if (touchApi) clearTestResult();   // 地址/密钥/模型改了就作废上一次测试结果
+                syncActiveProfile();
                 saveConfig();
             });
         }
-        bindText('aiiw-set-endpoint', 'endpoint');
-        bindText('aiiw-set-apikey', 'apiKey');
-        bindText('aiiw-set-model', 'model');
-        bindText('aiiw-set-temp', 'temperature', true);
-        bindText('aiiw-set-maxtokens', 'maxTokens', true);
+        bindText('aiiw-set-endpoint', 'endpoint', false, true);
+        bindText('aiiw-set-apikey', 'apiKey', false, true);
+        bindText('aiiw-set-model', 'model', false, true);
+        bindText('aiiw-set-temp', 'temperature', true, true);
+        bindText('aiiw-set-maxtokens', 'maxTokens', true, true);
         bindText('aiiw-set-sysprompt', 'systemPrompt');
+
+        /* --- API 方案 --- */
+        q('aiiw-profile-sel').addEventListener('change', function () {
+            applyProfile(this.value);
+        });
+        q('aiiw-profile-save').addEventListener('click', onSaveProfile);
+        q('aiiw-profile-del').addEventListener('click', onDeleteProfile);
+
+        /* --- 取模型 --- */
+        q('aiiw-fetch-models').addEventListener('click', onFetchModels);
+        q('aiiw-model-sel').addEventListener('change', function () {
+            if (!cfg) return;
+            if (this.value === '') {          // ✎ 手动输入
+                resetModelPick(cfg.model);
+                const input = q('aiiw-set-model');
+                if (input) input.focus();
+                return;
+            }
+            cfg.model = this.value;
+            setValue('aiiw-set-model', this.value);
+            clearTestResult();
+            syncActiveProfile();
+            saveConfig();
+        });
+
+        /* --- 测试连接 --- */
+        q('aiiw-test-api').addEventListener('click', onTestApi);
 
         q('aiiw-sysprompt-reset').addEventListener('click', function () {
             if (!cfg) return;
@@ -2204,7 +2633,9 @@
         q('aiiw-set-proxy').addEventListener('change', function () {
             if (!cfg) return;
             cfg.useProxy = this.checked;
+            syncActiveProfile();
             saveConfig();
+            clearTestResult();
         });
 
         /* 生成期间切聊天：切回来后把楼层列表刷新一下 */
